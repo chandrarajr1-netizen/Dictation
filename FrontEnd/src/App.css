@@ -1,0 +1,53 @@
+.app {
+  max-width: 600px;
+  margin: 40px auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+select,
+button,
+textarea {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+button {
+  cursor: pointer;
+  background: #f3f3f3;
+}
+
+.mic {
+  font-size: 1.2rem;
+  padding: 16px;
+}
+
+.mic.recording {
+  background: #e53935;
+  color: white;
+  border-color: #e53935;
+}
+
+.toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.toggle button {
+  flex: 1;
+}
+
+.toggle button.active {
+  background: #1e88e5;
+  color: white;
+  border-color: #1e88e5;
+}
+
+textarea {
+  min-height: 200px;
+  resize: vertical;
+}
