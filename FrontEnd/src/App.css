@@ -32,6 +32,38 @@ button {
   border-color: #e53935;
 }
 
+.mic.transcribing {
+  cursor: wait;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* Loading wheel */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ccc;
+  border-top-color: #1e88e5;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  margin: 0;
+  padding: 8px 12px;
+  color: #b71c1c;
+  background: #fdecea;
+  border-radius: 6px;
+}
+
 .toggle {
   display: flex;
   gap: 8px;

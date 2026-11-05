@@ -4,7 +4,7 @@ CORE IDEA: Speech to Text
 
 Process 
 
-Microphone --> React Frontend --POST ENDPOINT--> FastAPI Backend --> Whisper (speech -> raw text) --> OpenAI LLM (raw text --> cleaned text) --> React FrontEnd 
+Microphone --> React Frontend --POST ENDPOINT--> FastAPI Backend --> Whisper (speech -> raw text) --> Claude LLM (raw text --> cleaned text) --> React FrontEnd 
 
 Components 
 - Frontend 
@@ -23,11 +23,30 @@ Components
             - To clean up the text (remove filler words, clarify sentences, etc.). 
 
 
+Architecture 
+- FrontEnd 
+    - src/App.tsx 
+        - Records audio from the selected microphone and sends it to the backend. 
+        - Shows the returned text, a "Transcribing…" loading state, and any errors. 
+- BackEnd 
+    - main.py 
+        - Creates the FastAPI app and allows requests from the frontend (localhost:5173). 
+    - Controller Layer (controller/transcribe_controller.py) 
+        - POST /api/transcribe 
+        - Receives the audio file and returns { raw_text, cleaned_text, error }. 
+    - Service Layer (service/transcribe_service.py) 
+        - speech_to_text: Whisper converts the audio into raw text. 
+        - clean_up_text: Claude cleans up the raw text. 
+        - If the cleanup fails, the Whisper text is still returned with an error message. 
+    - .env 
+        - WHISPER_MODEL, CLAUDE_MODEL, ANTHROPIC_API_KEY 
+
+
 Technology 
 - Language: 
     - Backend: Python 
     - Frontend: React / TypeScript 
-- LLM: OpenAI 
+- LLM: Claude 
 - Libraries: 
     - Whisper (speech-to-text) 
 
