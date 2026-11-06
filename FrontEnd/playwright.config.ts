@@ -11,8 +11,14 @@ export default defineConfig({
   workers: 1, // one backend running Whisper, so run tests one at a time
   use: {
     baseURL: 'http://localhost:5173',
-    channel: 'chrome', // use the installed Google Chrome
   },
+  // Run every test in each browser. Playwright can't drive the Safari app itself,
+  // so "webkit" (the engine inside Safari) stands in for it.
+  projects: [
+    { name: 'chrome', use: { browserName: 'chromium', channel: 'chrome' } }, // installed Google Chrome
+    { name: 'firefox', use: { browserName: 'firefox' } },
+    { name: 'webkit', use: { browserName: 'webkit' } },
+  ],
   webServer: [
     {
       // Real backend.

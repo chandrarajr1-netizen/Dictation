@@ -1,31 +1,84 @@
 /**
- * End-to-end tests: real Chrome -> real frontend -> real backend -> real Whisper + real Claude.
+ * End-to-end tests: real browser -> real frontend -> real backend -> real Whisper + real Claude.
  *
- * Chrome's fake-microphone flags play a WAV file from Tests/audio as the microphone,
- * so each test "speaks" a known sentence. Nothing in the app is faked.
+ * Every test runs in Chrome, Firefox and WebKit (Safari's engine). Each test "speaks" a
+ * known sentence by playing a WAV file from Tests/audio as the microphone.
  * These call the real Claude API, so each run costs a small amount.
  *
  * Run from FrontEnd:  npm run test:e2e
+ * One browser only:   npm run test:e2e -- --project=firefox
  */
 import path from 'node:path'
 import { test as base, expect, type Page } from '@playwright/test'
 
 const AUDIO = path.resolve(__dirname, '../audio')
 
-// Each test opens Chrome with a WAV file from Tests/audio playing as the microphone.
-// Set `mic` to the file name, or to null to make Chrome deny microphone access.
+// Firefox and WebKit can't use a file as the microphone, so this runs inside the page:
+// it lets the browser's real getUserMedia run (so permissions still apply), then
+// returns the WAV clip played through the browser's own audio system instead.
+function playFileAsMicrophone(url: string) {
+  if (location.protocol === 'about:') return // the blank page before the app loads
+  const audio = new AudioContext()
+  const clip = fetch(url)
+    .then((response) => response.arrayBuffer())
+    .then((bytes) => audio.decodeAudioData(bytes))
+  // Replaced on the prototype: WebKit can drop properties set on navigator.mediaDevices itself.
+  const realGetUserMedia = MediaDevices.prototype.getUserMedia
+
+  MediaDevices.prototype.getUserMedia = async function (constraints) {
+    const real = await realGetUserMedia.call(this, constraints)
+    real.getTracks().forEach((track) => track.stop())
+
+    await audio.resume()
+    const source = audio.createBufferSource()
+    source.buffer = await clip
+    const output = audio.createMediaStreamDestination()
+    source.connect(output)
+    source.start()
+    return output.stream
+  }
+}
+
+// Each test opens a browser with a WAV file from Tests/audio playing as the microphone.
+// Set `mic` to the file name, or to null to make the browser deny microphone access.
 const test = base.extend<{ mic: string | null }>({
   mic: ['clean.wav', { option: true }],
-  page: async ({ playwright, mic, baseURL }, use) => {
-    const args = mic
-      ? [
-          '--use-fake-ui-for-media-stream', // auto-allow the microphone
-          '--use-fake-device-for-media-stream',
-          `--use-file-for-fake-audio-capture=${path.join(AUDIO, mic)}`,
-        ]
-      : ['--use-fake-device-for-media-stream', '--deny-permission-prompts']
-    const browser = await playwright.chromium.launch({ channel: 'chrome', args })
-    const page = await (await browser.newContext({ baseURL })).newPage()
+  page: async ({ playwright, browserName, mic, baseURL }, use) => {
+    const allow = mic !== null
+
+    if (browserName === 'chromium') {
+      // Chrome can play the file as its microphone directly.
+      const args = mic
+        ? [
+            '--use-fake-ui-for-media-stream', // auto-allow the microphone
+            '--use-fake-device-for-media-stream',
+            `--use-file-for-fake-audio-capture=${path.join(AUDIO, mic)}`,
+          ]
+        : ['--use-fake-device-for-media-stream', '--deny-permission-prompts']
+      const browser = await playwright.chromium.launch({ channel: 'chrome', args })
+      const page = await (await browser.newContext({ baseURL })).newPage()
+      await use(page)
+      await browser.close()
+      return
+    }
+
+    const browser =
+      browserName === 'firefox'
+        ? await playwright.firefox.launch({
+            firefoxUserPrefs: {
+              'media.navigator.streams.fake': true, // never touch the real microphone
+              'media.navigator.permission.disabled': allow, // auto-allow the microphone
+              'permissions.default.microphone': allow ? 1 : 2, // 2 = block
+            },
+          })
+        : await playwright.webkit.launch()
+    const context = await browser.newContext({ baseURL })
+    if (mic) {
+      if (browserName === 'webkit') await context.grantPermissions(['microphone'])
+      await context.route('**/__test-mic.wav', (route) => route.fulfill({ path: path.join(AUDIO, mic) }))
+      await context.addInitScript(playFileAsMicrophone, '/__test-mic.wav')
+    }
+    const page = await context.newPage()
     await use(page)
     await browser.close()
   },
@@ -47,7 +100,8 @@ async function openApp(page: Page) {
   await expect(page.getByRole('combobox').locator('option').first()).toBeAttached()
 }
 
-// Record for a number of seconds (long enough for the clip to play), then stop.
+// Record for a number of seconds, then stop. Each test records about a second longer
+// than its clip, because WebKit can drop the last part of a recording when it stops.
 async function record(page: Page, seconds: number) {
   await startButton(page).click()
   await expect(stopButton(page)).toBeVisible()
@@ -76,7 +130,7 @@ test.describe('speaking a clean sentence', () => {
     await openApp(page)
 
     const responsePromise = page.waitForResponse('**/api/transcribe')
-    await record(page, 3.5)
+    await record(page, 4)
     const response = await responsePromise
 
     // The browser sent a real file upload to the real backend...
@@ -97,7 +151,7 @@ test.describe('speaking a clean sentence', () => {
   test('shows the transcribing state with a loading wheel, then the result', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 3.5)
+    await record(page, 4)
 
     await expect(transcribingButton(page)).toBeVisible()
     await expect(transcribingButton(page)).toBeDisabled()
@@ -112,7 +166,7 @@ test.describe('speaking a clean sentence', () => {
   test('shows the cleaned text, and the toggle shows what Whisper heard', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 3.5)
+    await record(page, 4)
     await waitUntilDone(page)
 
     // Check "Thursday" and "afternoon": Whisper sometimes mishears "meeting" as "meaning".
@@ -131,11 +185,11 @@ test.describe('speaking a clean sentence', () => {
   test('adds a second recording on a new line', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 3.5)
+    await record(page, 4)
     await waitUntilDone(page)
     const first = await textBox(page).inputValue()
 
-    await record(page, 3.5)
+    await record(page, 4)
     await waitUntilDone(page)
 
     const lines = (await textBox(page).inputValue()).split('\n')
@@ -151,7 +205,7 @@ test.describe('speaking with filler words', () => {
   test('Whisper hears the fillers and Claude removes them', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 6.5)
+    await record(page, 7.5)
     await waitUntilDone(page)
 
     const cleaned = await textBox(page).inputValue()
@@ -170,7 +224,7 @@ test.describe('speaking a question', () => {
   test('Claude cleans up the question instead of answering it', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 2.5)
+    await record(page, 3.5)
     await waitUntilDone(page)
 
     const cleaned = await textBox(page).inputValue()
@@ -185,7 +239,7 @@ test.describe('speaking an instruction', () => {
   test('Claude does not follow the spoken instruction', async ({ page }) => {
     await openApp(page)
 
-    await record(page, 4.5)
+    await record(page, 5.5)
     await waitUntilDone(page)
 
     const cleaned = await textBox(page).inputValue()
@@ -218,7 +272,7 @@ test.describe('when something goes wrong', () => {
     )
     await openApp(page)
 
-    await record(page, 3.5)
+    await record(page, 4)
     await waitUntilDone(page)
 
     await expect(errorMessage(page)).toContainText('Cleanup failed')
